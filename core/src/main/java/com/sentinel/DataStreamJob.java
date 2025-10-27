@@ -1,10 +1,10 @@
-
 package com.sentinel;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sentinel.models.Click;
+import com.sentinel.models.Conversion;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -24,17 +24,8 @@ public class DataStreamJob {
     return mapper;
   }
 
-  public static KafkaSource<String> getClicksSource(
-      String bootstrapServers, Map<String, String> sslProperties) {
-
-    KafkaSourceBuilder<String> builder =
-        KafkaSource.<String>builder()
-            .setBootstrapServers(bootstrapServers)
-            .setTopics("clicks")
-            .setGroupId("sentinel-flink-job")
-            .setStartingOffsets(OffsetsInitializer.latest())
-            .setValueOnlyDeserializer(new SimpleStringSchema());
-
+  private static void configureSsl(
+      KafkaSourceBuilder<String> builder, Map<String, String> sslProperties) {
     if (sslProperties.get("ssl.keystore.key") != null) {
       builder.setProperty("security.protocol", "SSL");
       builder.setProperty("ssl.keystore.type", "PEM");
@@ -45,8 +36,66 @@ public class DataStreamJob {
       builder.setProperty(
           "ssl.keystore.certificate.chain", sslProperties.get("ssl.keystore.certificate.chain"));
     }
+  }
+
+  public static KafkaSource<String> getClicksSource(
+      String bootstrapServers, Map<String, String> sslProperties) {
+
+    KafkaSourceBuilder<String> builder =
+        KafkaSource.<String>builder()
+            .setBootstrapServers(bootstrapServers)
+            .setTopics("clicks")
+            .setGroupId("sentinel-flink-job-clicks")
+            .setProperty("client.id", "sentinel-flink-clicks")
+            .setStartingOffsets(OffsetsInitializer.latest())
+            .setValueOnlyDeserializer(new SimpleStringSchema());
+
+    configureSsl(builder, sslProperties);
 
     return builder.build();
+  }
+
+  public static KafkaSource<String> getConversionsSource(
+      String bootstrapServers, Map<String, String> sslProperties) {
+
+    KafkaSourceBuilder<String> builder =
+        KafkaSource.<String>builder()
+            .setBootstrapServers(bootstrapServers)
+            .setTopics("conversions")
+            .setGroupId("sentinel-flink-job-conversions")
+            .setProperty("client.id", "sentinel-flink-conversions")
+            .setStartingOffsets(OffsetsInitializer.latest())
+            .setValueOnlyDeserializer(new SimpleStringSchema());
+
+    configureSsl(builder, sslProperties);
+
+    return builder.build();
+  }
+
+  public static DataStream<Click> getClicksStream(
+      StreamExecutionEnvironment env, Map<String, String> sslProperties, String bootstrapServers) {
+
+    KafkaSource<String> clicksSource = getClicksSource(bootstrapServers, sslProperties);
+
+    DataStream<String> clicksJsonStream =
+        env.fromSource(clicksSource, WatermarkStrategy.noWatermarks(), "Kafka Source (Clicks)");
+
+    return clicksJsonStream
+        .map(clickJson -> getObjectMapper().readValue(clickJson, Click.class))
+        .name("Parse Payment json into class");
+  }
+
+  public static DataStream<Conversion> getConversionsStream(
+      StreamExecutionEnvironment env, Map<String, String> sslProperties, String bootstrapServers) {
+    KafkaSource<String> conversionsSource = getConversionsSource(bootstrapServers, sslProperties);
+
+    DataStream<String> conversionsJsonStream =
+        env.fromSource(
+            conversionsSource, WatermarkStrategy.noWatermarks(), "Kafka Source (Conversions)");
+
+    return conversionsJsonStream
+        .map(conversionJson -> getObjectMapper().readValue(conversionJson, Conversion.class))
+        .name("Parse conversion json into class");
   }
 
   public static void main(String[] args) throws Exception {
@@ -55,17 +104,12 @@ public class DataStreamJob {
     String bootstrapServers = "kafka:9092";
     Map<String, String> sslProperties = new HashMap<>();
 
-    KafkaSource<String> clicksSource = getClicksSource(bootstrapServers, sslProperties);
+    DataStream<Click> clicksDataStream = getClicksStream(env, sslProperties, bootstrapServers);
 
-    DataStream<String> clicksJsonStream =
-        env.fromSource(clicksSource, WatermarkStrategy.noWatermarks(), "Kafka Source (Clicks)");
 
-    DataStream<Click> clicksDataStream =
-        clicksJsonStream
-            .map(clickJson -> getObjectMapper().readValue(clickJson, Click.class))
-            .name("Parse Payment json into class");
+    DataStream<Conversion> conversionDataStream =
+        getConversionsStream(env, sslProperties, bootstrapServers);
 
-    clicksDataStream.map(Click::toString).print();
 
     env.execute("Flink Java API Skeleton");
   }
