@@ -8,15 +8,15 @@ from confluent_kafka import Producer
 
 
 class Click:
-    def __init__(self, event_id: str, timestamp_event_time: str, ip_address: str, ad_uuid: str):
-        self.event_id = event_id
+    def __init__(self, event_uuid: str, timestamp_event_time: str, ip_address: str, ad_uuid: str):
+        self.event_uuid = event_uuid
         self.timestamp_event_time = timestamp_event_time
         self.ip_address = ip_address
         self.ad_uuid = ad_uuid
 
     def to_dict(self):
         return {
-            "event_id": self.event_id,
+            "event_uuid": self.event_id,
             "timestamp_event_time": self.timestamp_event_time,
             "ip_address": self.ip_address,
             "ad_uuid": self.ad_uuid,
@@ -60,9 +60,9 @@ if __name__ == "__main__":
     ip_addresses = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
 
 
-    for x in range(0, 100):
+    for x in range(0, 5000):
         events.append(Click(
-            event_id=str(uuid.uuid4()),
+            event_uuid=str(uuid.uuid4()),
             timestamp_event_time=str(datetime.now().isoformat()),
             ip_address=random.choice(ip_addresses),
             ad_uuid=str(random.choice(ad_ids)),
