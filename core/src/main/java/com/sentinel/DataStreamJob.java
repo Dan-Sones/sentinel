@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sentinel.models.Click;
 import com.sentinel.models.Conversion;
+import com.sentinel.models.IpWrapper;
+import com.sentinel.models.SessionWindowResult;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -14,6 +17,7 @@ import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
 
 public class DataStreamJob {
 
@@ -106,10 +110,21 @@ public class DataStreamJob {
 
     DataStream<Click> clicksDataStream = getClicksStream(env, sslProperties, bootstrapServers);
 
-
     DataStream<Conversion> conversionDataStream =
         getConversionsStream(env, sslProperties, bootstrapServers);
 
+    DataStream<IpWrapper> clicksDataStreamWrapped = clicksDataStream.map(IpWrapper::fromClick);
+    DataStream<IpWrapper> conversionDataStreamWrapped =
+        conversionDataStream.map(IpWrapper::fromConversion);
+
+    DataStream<IpWrapper> unifiedStream =
+        clicksDataStreamWrapped.union(conversionDataStreamWrapped);
+
+    DataStream<SessionWindowResult> resultDataStream =
+        unifiedStream
+            .keyBy(IpWrapper::getIpAddressKey)
+            .window(EventTimeSessionWindows.withGap(Duration.ofMinutes(10)))
+            .aggregate(new SessionAggregator(), new SessionProcessWindowFunction());
 
     env.execute("Flink Java API Skeleton");
   }
